@@ -14,12 +14,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
+import logging
+import sys
 
-from fastapi import FastAPI, Depends, HTTPException, Query, status
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 import redis.asyncio as aioredis
 
 from .config import settings
@@ -29,9 +32,24 @@ from .schemas import (
     TicketCreate,
     TicketResponse,
     TicketListResponse,
-    HealthCheckResponse
+    HealthCheckResponse,
+    ErrorResponse
 )
 from .tasks import process_ticket
+from .middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
+from .exceptions import (
+    BaseAPIException,
+    TicketNotFoundException,
+    DatabaseException,
+)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if settings.debug else logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -77,6 +95,10 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Add custom middleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
 # Configure CORS for frontend access
 app.add_middleware(
     CORSMiddleware,
@@ -84,7 +106,38 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP methods
     allow_headers=["*"],  # Allow all headers
+    expose_headers=["X-Request-ID"],  # Expose request ID to frontend
 )
+
+# Global exception handlers
+@app.exception_handler(BaseAPIException)
+async def api_exception_handler(request: Request, exc: BaseAPIException):
+    """Handle custom API exceptions."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": exc.detail,
+            "error_code": exc.error_code,
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id}
+    )
+
+@app.exception_handler(SQLAlchemyError)
+async def database_exception_handler(request: Request, exc: SQLAlchemyError):
+    """Handle database errors."""
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.error(f"Database error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Database error occurred",
+            "error_code": "DATABASE_ERROR",
+            "request_id": request_id,
+        },
+        headers={"X-Request-ID": request_id}
+    )
 
 
 # ============================================================================
@@ -187,17 +240,29 @@ async def create_ticket(
         await db.commit()
         await db.refresh(new_ticket)
         
+        logger.info(f"Created ticket {new_ticket.id}")
+        
         # Trigger background task (non-blocking)
         # The .delay() method queues the task and returns immediately
-        process_ticket.delay(str(new_ticket.id))
+        try:
+            process_ticket.delay(str(new_ticket.id))
+            logger.info(f"Queued processing task for ticket {new_ticket.id}")
+        except Exception as worker_error:
+            logger.error(f"Failed to queue task: {worker_error}")
+            # Continue anyway - ticket is created, can be processed manually
         
         return TicketResponse.model_validate(new_ticket)
         
+    except SQLAlchemyError as e:
+        await db.rollback()
+        logger.error(f"Database error creating ticket: {e}", exc_info=True)
+        raise DatabaseException("Failed to create ticket")
     except Exception as e:
         await db.rollback()
+        logger.error(f"Unexpected error creating ticket: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create ticket: {str(e)}"
+            detail="Failed to create ticket"
         )
 
 
@@ -317,19 +382,20 @@ async def get_ticket(
         ticket = result.scalar_one_or_none()
         
         if not ticket:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Ticket {ticket_id} not found"
-            )
+            raise TicketNotFoundException(str(ticket_id))
         
         return TicketResponse.model_validate(ticket)
         
-    except HTTPException:
+    except TicketNotFoundException:
         raise
+    except SQLAlchemyError as e:
+        logger.error(f"Database error fetching ticket {ticket_id}: {e}", exc_info=True)
+        raise DatabaseException("Failed to fetch ticket")
     except Exception as e:
+        logger.error(f"Unexpected error fetching ticket {ticket_id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch ticket: {str(e)}"
+            detail="Failed to fetch ticket"
         )
 
 

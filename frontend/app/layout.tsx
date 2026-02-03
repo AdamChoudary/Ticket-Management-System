@@ -1,12 +1,24 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Space_Grotesk, Inter } from "next/font/google";
 import "./globals.css";
+import { ToastProvider } from "@/components/toast-provider";
 
-const inter = Inter({ subsets: ["latin"] });
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-space-grotesk",
+});
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "AI Support Hub - Intelligent Ticket Triage",
-  description: "Production-ready MVP for AI-powered support ticket processing with real-time status updates",
+  title: "AI Support Hub - Intelligent Ticket Triage System",
+  description: "Production-ready AI-powered support ticket processing with real-time status updates, automated categorization, and intelligent response drafting.",
+  keywords: ["AI", "support", "tickets", "customer service", "automation"],
 };
 
 export default function RootLayout({
@@ -15,11 +27,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <div className="min-h-screen bg-gray-50">
+    <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable}`}>
+      <body className={`${spaceGrotesk.className} antialiased`}>
+        <ToastProvider>
           {children}
-        </div>
+        </ToastProvider>
       </body>
     </html>
   );

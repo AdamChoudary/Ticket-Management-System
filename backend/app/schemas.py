@@ -78,6 +78,23 @@ class HealthCheckResponse(BaseModel):
     timestamp: datetime
 
 
+class ErrorResponse(BaseModel):
+    """Standard error response schema."""
+    detail: str
+    error_code: Optional[str] = None
+    request_id: Optional[str] = None
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "detail": "Ticket not found",
+                "error_code": "TICKET_NOT_FOUND",
+                "request_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+            }
+        }
+    }
+
+
 # ============================================================================
 # AI Worker Schemas
 # ============================================================================
