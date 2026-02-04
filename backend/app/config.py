@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     celery_broker_url: str = Field(default="", description="Celery broker URL (auto-computed if empty)")
     celery_result_backend: str = Field(default="", description="Celery result backend (auto-computed if empty)")
     
+    # AI Configuration
+    openai_api_key: str = Field(default="", description="OpenAI API Key (optional)")
+    openai_model: str = Field(default="gpt-4-turbo-preview", description="OpenAI Model ID")
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

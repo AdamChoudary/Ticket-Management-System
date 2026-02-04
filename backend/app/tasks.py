@@ -75,83 +75,7 @@ WorkerSessionLocal = async_sessionmaker(
 )
 
 
-async def mock_ai_analysis(content: str) -> AIAnalysisResult:
-    """
-    Mock AI function that simulates OpenAI API call.
-    
-    In production, replace this with actual OpenAI API integration:
-    
-    ```python
-    from openai import AsyncOpenAI
-    
-    async def real_ai_analysis(content: str) -> AIAnalysisResult:
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-        
-        response = await client.chat.completions.create(
-            model="gpt-4-turbo-preview",
-            messages=[
-                {"role": "system", "content": "You are a support ticket analyzer..."},
-                {"role": "user", "content": content}
-            ],
-            response_format={"type": "json_object"},
-        )
-        
-        # Parse response into structured format
-        result = json.loads(response.choices[0].message.content)
-        return AIAnalysisResult(**result)
-    ```
-    
-    Args:
-        content: User's complaint/request text
-        
-    Returns:
-        AIAnalysisResult: Structured AI analysis
-    """
-    # Simulate API latency (OpenAI typically takes 2-5 seconds)
-    await asyncio.sleep(3)
-    
-    # Simulate intelligent analysis based on keywords
-    content_lower = content.lower()
-    
-    # Determine urgency
-    if any(word in content_lower for word in ["urgent", "critical", "immediately", "asap", "locked"]):
-        urgency = "High"
-        sentiment_score = 3
-    elif any(word in content_lower for word in ["slow", "issue", "problem", "error"]):
-        urgency = "Medium"
-        sentiment_score = 5
-    else:
-        urgency = "Low"
-        sentiment_score = 7
-    
-    # Determine category
-    if any(word in content_lower for word in ["billing", "payment", "charge", "subscription", "invoice"]):
-        category = "Billing"
-    elif any(word in content_lower for word in ["login", "password", "error", "bug", "crash", "technical"]):
-        category = "Technical"
-    elif any(word in content_lower for word in ["feature", "request", "suggestion", "add", "improve"]):
-        category = "Feature"
-    else:
-        category = "Other"
-    
-    # Generate contextual draft response
-    draft_response = f"""Thank you for reaching out to us regarding: "{content[:60]}..."
-
-We understand your concern and have classified this as a {urgency.lower()} priority {category.lower()} issue. Our team is reviewing your request and will provide a detailed response within 24 hours.
-
-In the meantime, if you have any additional information that might help us resolve this faster, please feel free to reply to this ticket.
-
-Best regards,
-AI Support Hub Team
-"""
-    
-    return AIAnalysisResult(
-        urgency=urgency,
-        sentiment_score=sentiment_score,
-        category=category,
-        draft_response=draft_response.strip()
-    )
-
+from .services.ai_service import ai_service
 
 async def process_ticket_async(ticket_id: UUID) -> dict:
     """
@@ -160,7 +84,7 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
     This is the core business logic:
     1. Fetch ticket from DB
     2. Update status to "processing"
-    3. Call AI for analysis
+    3. Call AI for analysis (AI Service handles LLM vs Mock)
     4. Validate AI response
     5. Update ticket with results
     6. Set status to "completed"
@@ -197,12 +121,12 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
             )
             await db.commit()
             
-            # Step 3: Call AI for analysis (this is the slow operation)
+            # Step 3: Call AI Service (Handles LLM Logic + Fallback)
             try:
-                ai_result = await mock_ai_analysis(ticket.request_content)
+                ai_result = await ai_service.analyze_ticket(ticket.request_content)
                 logger.info(f"AI analysis completed for ticket {ticket_id}: {ai_result.category}, {ai_result.urgency}")
             except Exception as ai_error:
-                logger.error(f"AI analysis failed for ticket {ticket_id}: {ai_error}")
+                logger.error(f"AI Service Critical Failure for ticket {ticket_id}: {ai_error}")
                 
                 # Update status to failed
                 await db.execute(
@@ -214,7 +138,7 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
                 
                 return {
                     "success": False,
-                    "message": f"AI analysis failed: {str(ai_error)}",
+                    "message": f"AI analysis critical failure: {str(ai_error)}",
                     "processing_time_seconds": time.time() - start_time
                 }
             

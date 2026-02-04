@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { api, APIError } from "@/lib/api";
-import { Loader2, ArrowLeft, Send, Eraser, Sparkles, Zap, Brain, CheckCircle2, Info, Shield } from "lucide-react";
+import { Loader2, ArrowLeft, Send, Eraser, Sparkles, Zap, Brain, CheckCircle2, Info } from "lucide-react";
 import { useToast } from "@/components/toast-provider";
 
 export default function SubmitTicketPage() {
@@ -41,7 +41,7 @@ export default function SubmitTicketPage() {
         setIsSubmitting(true);
 
         try {
-            const ticket = await api.createTicket({ request_content: trimmedContent });
+            await api.createTicket({ request_content: trimmedContent });
 
             toast("Ticket created successfully!", "success");
             setContent("");
@@ -66,203 +66,156 @@ export default function SubmitTicketPage() {
     const progressPercentage = Math.min((charCount / 5000) * 100, 100);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-            {/* Grid Pattern */}
-            <div className="absolute inset-0 bg-grid-white opacity-10" />
+        <div className="min-h-screen relative flex items-center justify-center overflow-hidden" style={{ background: '#0C0A09' }}>
+            {/* Ambient Mist Glows (Platinum) */}
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-stone-500/5 rounded-full blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-white/5 rounded-full blur-[100px] pointer-events-none" />
 
             <div className="container relative mx-auto px-5 md:px-4 py-8 md:py-12">
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-3xl mx-auto">
                     {/* Header Navigation */}
-                    <div className="mb-8 animate-slide-down">
+                    <div className="mb-8 animate-slide-down text-center md:text-left">
                         <Link href="/">
-                            <Button variant="ghost" size="sm" className="mb-6 text-slate-300 hover:text-white hover:bg-slate-800">
+                            <Button variant="ghost" size="sm" className="mb-6 text-stone-500 hover:text-[#FAFAF9] hover:bg-stone-900 transition-colors">
                                 <ArrowLeft className="mr-2 h-4 w-4" />
                                 Back to Home
                             </Button>
                         </Link>
 
-                        <div className="inline-flex items-center gap-2 px-4 py-2 mb-4 bg-blue-500/10 border border-blue-500/20 rounded-full backdrop-blur-sm">
-                            <Sparkles className="h-4 w-4 text-blue-400" />
-                            <span className="text-sm font-semibold text-blue-300">AI-Powered Ticket System</span>
+                        <div className="inline-flex items-center gap-2 px-3 py-1 mb-4 rounded-full bg-stone-900/50 border border-stone-800 backdrop-blur-sm mx-auto md:mx-0">
+                            <Sparkles className="h-3.5 w-3.5 text-stone-400" />
+                            <span className="text-xs font-medium text-stone-400 uppercase tracking-widest">Concierge Intake</span>
                         </div>
 
-                        <h1 className="text-4xl md:text-5xl font-bold text-white mb-3 tracking-tight">
-                            Submit a Support Ticket
+                        <h1 className="text-4xl md:text-5xl font-serif font-bold text-[#FAFAF9] mb-3 tracking-tight">
+                            Submit Request
                         </h1>
-                        <p className="text-lg text-slate-300 leading-relaxed">
-                            Describe your issue in detail. Our AI will analyze and categorize your ticket automatically within seconds.
+                        <p className="text-lg text-stone-500 leading-relaxed font-light">
+                            Describe your issue. Our intelligent agents will classify and route it instantly.
                         </p>
                     </div>
 
                     {/* Main Form Card */}
-                    <Card className="glass-dark border-2 border-slate-700/50 mb-8 animate-slide-up overflow-hidden">
-                        <div className="bg-gradient-to-r from-blue-600/20 to-violet-600/20 border-b border-slate-700/50 px-6 py-4">
-                            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                                <Send className="h-5 w-5 text-blue-400" />
-                                New Support Request
-                            </h2>
-                        </div>
+                    <Card
+                        className="relative overflow-hidden mb-12 animate-slide-up"
+                        style={{
+                            background: '#141210', // Deep Stone
+                            border: '1px solid rgba(231, 229, 228, 0.1)', // Subtle Platinum
+                            boxShadow: '0 20px 40px -10px rgba(0,0,0,0.5)'
+                        }}
+                    >
+                        {/* Top Accent Line */}
+                        <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-stone-500/50 to-transparent" />
 
-                        <CardContent className="p-5 md:p-6 lg:p-8">
-                            <form onSubmit={handleSubmit} className="space-y-6">
+                        <CardContent className="p-6 md:p-10">
+                            <form onSubmit={handleSubmit} className="space-y-8">
                                 <div>
-                                    <label htmlFor="content" className="block text-sm font-bold text-slate-200 mb-3">
-                                        Describe Your Issue <span className="text-red-400">*</span>
+                                    <label htmlFor="content" className="block text-sm font-medium text-stone-400 mb-4 uppercase tracking-wider">
+                                        Request Details
                                     </label>
-                                    <Textarea
-                                        id="content"
-                                        placeholder="Example: My account has been locked since yesterday. I've tried resetting my password multiple times, but the reset email never arrives. This is urgent as I need access to process pending customer orders and view my dashboard analytics."
-                                        value={content}
-                                        onChange={handleContentChange}
-                                        rows={10}
-                                        disabled={isSubmitting}
-                                        className="w-full resize-none text-sm md:text-base leading-relaxed bg-slate-900/50 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-500"
-                                        required
-                                        maxLength={5000}
-                                        aria-describedby="char-count"
-                                    />
+                                    <div className="relative group">
+                                        <Textarea
+                                            id="content"
+                                            placeholder="Please describe your technical issue..."
+                                            value={content}
+                                            onChange={handleContentChange}
+                                            rows={8}
+                                            disabled={isSubmitting}
+                                            className="w-full resize-none text-base leading-relaxed p-6 rounded-lg transition-all duration-300"
+                                            style={{
+                                                background: '#0C0A09',
+                                                border: '1px solid #292524', // Stone-800
+                                                color: '#FAFAF9',
+                                            }}
+                                            required
+                                            maxLength={5000}
+                                        />
+                                        {/* Focus Ring Animation would go here in CSS, but inline style serves for now */}
+                                    </div>
 
                                     {/* Character Counter */}
-                                    <div className="mt-4 space-y-2">
-                                        <div className="flex justify-between items-center">
-                                            <p
-                                                id="char-count"
-                                                className={`text-sm font-semibold ${charCount < 10
-                                                    ? "text-red-400"
-                                                    : charCount > 4500
-                                                        ? "text-amber-400"
-                                                        : "text-emerald-400"
-                                                    }`}
-                                            >
-                                                {charCount.toLocaleString()} / 5,000 characters
-                                                {charCount < 10 && charCount > 0 && (
-                                                    <span className="ml-2 text-red-400">
-                                                        ({10 - charCount} more needed)
-                                                    </span>
-                                                )}
-                                            </p>
-                                            {charCount >= 10 && (
-                                                <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                                                    <CheckCircle2 className="h-3 w-3" />
-                                                    Valid length
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        {/* Progress Bar */}
-                                        {charCount > 0 && (
-                                            <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                                    <div className="mt-4 flex justify-between items-center px-1">
+                                        <div className="flex items-center gap-3">
+                                            {/* Minimalist Progress Bar */}
+                                            <div className="w-24 h-1 bg-stone-900 rounded-full overflow-hidden">
                                                 <div
-                                                    className={`h-full transition-all duration-300 ${charCount < 10
-                                                        ? "bg-gradient-to-r from-red-500 to-red-600"
-                                                        : charCount > 4500
-                                                            ? "bg-gradient-to-r from-amber-500 to-amber-600"
-                                                            : "bg-gradient-to-r from-emerald-500 to-emerald-600"
-                                                        }`}
+                                                    className="h-full transition-all duration-500 bg-stone-500"
                                                     style={{ width: `${progressPercentage}%` }}
                                                 />
                                             </div>
+                                            <span className="text-xs text-stone-600 font-mono">
+                                                {charCount} / 5000
+                                            </span>
+                                        </div>
+
+                                        {charCount >= 10 && (
+                                            <span className="text-xs text-stone-500 flex items-center gap-1.5 animate-fadeIn">
+                                                <CheckCircle2 className="h-3 w-3" />
+                                                Ready to submit
+                                            </span>
                                         )}
                                     </div>
                                 </div>
 
                                 {/* Action Buttons */}
-                                <div className="flex gap-3 pt-2">
+                                <div className="flex gap-4 pt-2">
                                     <Button
                                         type="submit"
                                         disabled={isSubmitting || !isValid}
-                                        className="flex-1 text-sm md:text-base py-5 md:py-6 glow-blue-subtle hover-glow bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700"
-                                        size="lg"
+                                        className="flex-1 text-base py-6 font-semibold transition-all duration-300 group relative overflow-hidden"
+                                        style={{
+                                            background: '#1C1917',
+                                            border: '1px solid rgba(231, 229, 228, 0.2)',
+                                            color: '#FAFAF9'
+                                        }}
                                     >
-                                        {isSubmitting ? (
-                                            <>
-                                                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                                Submitting...
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Send className="mr-2 h-5 w-5" />
-                                                Submit Ticket
-                                            </>
-                                        )}
+                                        <span className="relative z-10 flex items-center justify-center gap-2">
+                                            {isSubmitting ? (
+                                                <>
+                                                    <Loader2 className="h-4 w-4 animate-spin text-stone-400" />
+                                                    Processing...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    Initiate Sequence
+                                                    <Send className="h-4 w-4 text-stone-400 group-hover:translate-x-1 transition-transform" />
+                                                </>
+                                            )}
+                                        </span>
+                                        {/* Hover Fill */}
+                                        <div className="absolute inset-0 bg-stone-800/50 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                                     </Button>
+
                                     <Button
                                         type="button"
-                                        variant="outline"
-                                        size="lg"
+                                        variant="ghost"
                                         onClick={() => {
                                             setContent("");
                                             setCharCount(0);
                                         }}
                                         disabled={isSubmitting || content.length === 0}
-                                        className="px-6 md:px-8 border-slate-600 text-slate-300 hover:bg-slate-800 hover:border-slate-500"
+                                        className="py-6 px-6 text-stone-500 hover:text-stone-300 hover:bg-stone-900/50 border border-transparent hover:border-stone-800"
                                     >
-                                        <Eraser className="mr-2 h-5 w-5" />
-                                        Clear
+                                        <Eraser className="h-5 w-5" />
                                     </Button>
                                 </div>
                             </form>
                         </CardContent>
                     </Card>
 
-                    {/* Feature Grid */}
-                    <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6 mb-8 animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                        <div className="glass-dark p-6 rounded-xl border border-slate-700/50 hover:bg-white/5 transition-all duration-300">
-                            <div className="w-10 md:w-12 h-10 md:h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center mb-4 shadow-lg">
-                                <Zap className="h-5 md:h-6 w-5 md:w-6 text-white" />
+                    {/* Minimal Features */}
+                    <div className="grid grid-cols-3 gap-4 border-t border-stone-800/50 pt-8 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+                        {[
+                            { icon: Zap, label: "Instant Ingest", desc: "<100ms Latency" },
+                            { icon: Brain, label: "AI Analysis", desc: "Semantic Classify" },
+                            { icon: Info, label: "Live Trace", desc: "Real-time Status" }
+                        ].map((item, i) => (
+                            <div key={i} className="text-center group">
+                                <item.icon className="h-5 w-5 text-stone-600 group-hover:text-stone-400 mx-auto mb-2 transition-colors duration-300" />
+                                <h3 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-1">{item.label}</h3>
+                                <p className="text-[10px] text-stone-600 font-mono">{item.desc}</p>
                             </div>
-                            <h3 className="font-bold text-white mb-2 text-base md:text-lg">Instant Response</h3>
-                            <p className="text-sm text-slate-400 leading-relaxed">
-                                Your ticket is saved in &lt; 100ms with immediate confirmation and unique ID.
-                            </p>
-                        </div>
-
-                        <div className="glass-dark p-6 rounded-xl border border-slate-700/50 hover:bg-white/5 transition-all duration-300">
-                            <div className="w-10 md:w-12 h-10 md:h-12 bg-gradient-to-br from-violet-500 to-violet-600 rounded-xl flex items-center justify-center mb-4 shadow-lg">
-                                <Brain className="h-5 md:h-6 w-5 md:w-6 text-white" />
-                            </div>
-                            <h3 className="font-bold text-white mb-2 text-base md:text-lg">AI Analysis</h3>
-                            <p className="text-sm text-slate-400 leading-relaxed">
-                                Background processing categorizes and analyzes sentiment within 3-5 seconds.
-                            </p>
-                        </div>
-
-                        <div className="glass-dark p-6 rounded-xl border border-slate-700/50 hover:bg-white/5 transition-all duration-300">
-                            <div className="w-10 md:w-12 h-10 md:h-12 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl flex items-center justify-center mb-4 shadow-lg">
-                                <CheckCircle2 className="h-5 md:h-6 w-5 md:w-6 text-white" />
-                            </div>
-                            <h3 className="font-bold text-white mb-2 text-base md:text-lg">Live Tracking</h3>
-                            <p className="text-sm text-slate-400 leading-relaxed">
-                                Monitor your ticket's progress in real-time on the dashboard.
-                            </p>
-                        </div>
-                    </div>
-
-                    {/* Process Timeline */}
-                    <div className="glass-dark p-5 md:p-6 lg:p-8 rounded-xl border border-slate-700/50 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-                        <div className="flex items-center gap-2 mb-6">
-                            <Info className="h-5 w-5 text-blue-400" />
-                            <h3 className="text-lg font-bold text-white">What Happens Next?</h3>
-                        </div>
-                        <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
-                            {[
-                                { num: "1", title: "Instant Save", desc: "Ticket stored in PostgreSQL database immediately" },
-                                { num: "2", title: "Queue Job", desc: "Celery worker picks up task from Redis queue" },
-                                { num: "3", title: "AI Processing", desc: "Analyzes urgency, sentiment (1-10), and category" },
-                                { num: "4", title: "Live Updates", desc: "Dashboard shows real-time status changes every 3s" }
-                            ].map((step) => (
-                                <div key={step.num} className="flex gap-4">
-                                    <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-blue-600 to-violet-600 text-white rounded-xl flex items-center justify-center font-bold shadow-lg">
-                                        {step.num}
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-slate-200 leading-relaxed">
-                                            <span className="font-bold">{step.title}:</span> {step.desc}
-                                        </p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+                        ))}
                     </div>
                 </div>
             </div>
