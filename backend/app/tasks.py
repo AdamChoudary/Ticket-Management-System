@@ -31,6 +31,7 @@ from celery import Celery
 from celery.utils.log import get_task_logger
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
 
 from .config import settings
 from .models import Ticket, TicketStatus
@@ -62,10 +63,14 @@ celery_app.conf.update(
 logger = get_task_logger(__name__)
 
 # Create async engine for worker (separate from API)
+# CRITICAL: Use NullPool because Celery workers run synchronous tasks that
+# create a new asyncio loop for each execution. Standard pooling tries to
+# reuse connections attached to closed loops, causing "Future attached to different loop" errors.
 worker_engine = create_async_engine(
     settings.database_url,
     echo=False,
     pool_pre_ping=True,
+    poolclass=NullPool,
 )
 
 WorkerSessionLocal = async_sessionmaker(
@@ -215,15 +220,9 @@ def process_ticket(self, ticket_id: str) -> dict:
         ticket_uuid = UUID(ticket_id)
         
         # Run async processing
-        # We need to create a new event loop because Celery workers run in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            result = loop.run_until_complete(process_ticket_async(ticket_uuid))
-            return result
-        finally:
-            loop.close()
+        # We utilize asyncio.run() which correctly creates and closes a new event loop
+        # Combined with NullPool, this ensures thread/loop safety
+        return asyncio.run(process_ticket_async(ticket_uuid))
             
     except ValueError as e:
         logger.error(f"Invalid ticket ID format: {ticket_id}")
