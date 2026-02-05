@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", description="OpenAI API Key (optional)")
     openai_model: str = Field(default="gpt-4-turbo-preview", description="OpenAI Model ID")
     
+    gemini_api_key: str = Field(default="", description="Google Gemini API Key (optional)")
+    gemini_model: str = Field(default="gemini-1.5-flash", description="Google Gemini Model ID")
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
