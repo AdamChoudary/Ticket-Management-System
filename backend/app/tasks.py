@@ -25,6 +25,8 @@ WORKFLOW:
 
 import asyncio
 import time
+import json
+import redis.asyncio as aioredis
 from typing import Optional
 from uuid import UUID
 from celery import Celery
@@ -33,7 +35,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.pool import NullPool
 
-from .config import settings
+from .core.config import settings
 from .models import Ticket, TicketStatus
 from .schemas import AIAnalysisResult
 
@@ -82,7 +84,7 @@ WorkerSessionLocal = async_sessionmaker(
 
 from .services.ai_service import ai_service
 
-async def process_ticket_async(ticket_id: UUID) -> dict:
+async def process_ticket_async(ticket_id: UUID, api_key: Optional[str] = None) -> dict:
     """
     Async function to process a ticket with AI analysis.
     
@@ -96,6 +98,7 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
     
     Args:
         ticket_id: UUID of the ticket to process
+        api_key: Optional user-provided API key for AI service
         
     Returns:
         dict: Result summary with success status and processing time
@@ -126,9 +129,23 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
             )
             await db.commit()
             
+            # Publish Status Update: Processing
+            try:
+                redis_client = aioredis.from_url(settings.redis_url)
+                await redis_client.publish("ticket_updates", json.dumps({
+                    "type": "status_update",
+                    "ticket": {
+                        "id": str(ticket_id),
+                        "status": "processing"
+                    }
+                }))
+                await redis_client.close()
+            except Exception as e:
+                logger.error(f"Redis publish failed: {e}")
+            
             # Step 3: Call AI Service (Handles LLM Logic + Fallback)
             try:
-                ai_result = await ai_service.analyze_ticket(ticket.request_content)
+                ai_result = await ai_service.analyze_ticket(ticket.request_content, api_key=api_key)
                 logger.info(f"AI analysis completed for ticket {ticket_id}: {ai_result.category}, {ai_result.urgency}")
             except Exception as ai_error:
                 logger.error(f"AI Service Critical Failure for ticket {ticket_id}: {ai_error}")
@@ -140,6 +157,21 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
                     .values(status=TicketStatus.FAILED)
                 )
                 await db.commit()
+                
+                # Publish Status Update: Failed
+                try:
+                    redis_client = aioredis.from_url(settings.redis_url)
+                    await redis_client.publish("ticket_updates", json.dumps({
+                        "type": "status_update",
+                        "ticket": {
+                            "id": str(ticket_id),
+                            "status": "failed",
+                            "error": str(ai_error)
+                        }
+                    }))
+                    await redis_client.close()
+                except Exception as e:
+                    logger.error(f"Redis publish failed: {e}")
                 
                 return {
                     "success": False,
@@ -160,6 +192,24 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
                 )
             )
             await db.commit()
+            
+            # Publish Status Update: Completed
+            try:
+                redis_client = aioredis.from_url(settings.redis_url)
+                # Fetch fresh ticket data to send full details including AI results
+                fresh_ticket = await db.scalar(select(Ticket).where(Ticket.id == ticket_id))
+                
+                if fresh_ticket:
+                    from .schemas import TicketResponse
+                    ticket_json = TicketResponse.model_validate(fresh_ticket).model_dump(mode="json")
+                    
+                    await redis_client.publish("ticket_updates", json.dumps({
+                        "type": "status_update",
+                        "ticket": ticket_json
+                    }))
+                await redis_client.close()
+            except Exception as e:
+                logger.error(f"Redis publish failed: {e}")
             
             processing_time = time.time() - start_time
             logger.info(f"Ticket {ticket_id} completed in {processing_time:.2f}s")
@@ -197,7 +247,7 @@ async def process_ticket_async(ticket_id: UUID) -> dict:
     max_retries=3,
     default_retry_delay=60,  # Retry after 60 seconds
 )
-def process_ticket(self, ticket_id: str) -> dict:
+def process_ticket(self, ticket_id: str, api_key: Optional[str] = None) -> dict:
     """
     Celery task to process a support ticket.
     
@@ -206,6 +256,7 @@ def process_ticket(self, ticket_id: str) -> dict:
     
     Args:
         ticket_id: UUID string of the ticket to process
+        api_key: Optional API key override
         
     Returns:
         dict: Processing result with success status
@@ -222,7 +273,7 @@ def process_ticket(self, ticket_id: str) -> dict:
         # Run async processing
         # We utilize asyncio.run() which correctly creates and closes a new event loop
         # Combined with NullPool, this ensures thread/loop safety
-        return asyncio.run(process_ticket_async(ticket_uuid))
+        return asyncio.run(process_ticket_async(ticket_uuid, api_key))
             
     except ValueError as e:
         logger.error(f"Invalid ticket ID format: {ticket_id}")

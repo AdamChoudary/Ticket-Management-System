@@ -10,7 +10,7 @@ This module provides:
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from .config import settings
+from .core.config import settings
 
 # Create async engine with connection pooling
 # pool_pre_ping ensures connections are validated before use

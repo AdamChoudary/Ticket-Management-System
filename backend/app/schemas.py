@@ -34,6 +34,16 @@ class TicketCreate(BaseModel):
         return v.strip()
 
 
+class TicketUpdate(BaseModel):
+    """Schema for updating an existing ticket (agent actions)."""
+    draft_response: Optional[str] = Field(None, max_length=5000)
+    status: Optional[TicketStatus] = None
+    urgency: Optional[UrgencyLevel] = None
+    category: Optional[TicketCategory] = None
+    
+    model_config = {"use_enum_values": True}
+
+
 class TicketResponse(BaseModel):
     """Response schema for a single ticket."""
     id: UUID

@@ -108,6 +108,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip security headers for WebSocket connections
+        if request.url.path.startswith("/ws/"):
+            return await call_next(request)
+            
         response = await call_next(request)
         
         # Security headers

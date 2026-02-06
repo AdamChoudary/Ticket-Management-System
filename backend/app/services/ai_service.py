@@ -5,7 +5,7 @@ import asyncio
 from typing import Optional, Dict, Any
 
 from openai import AsyncOpenAI, APIError, APITimeoutError
-from ..config import settings
+from ..core.config import settings
 from ..schemas import AIAnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -14,9 +14,19 @@ import logging
 import asyncio
 from typing import Optional, Dict, Any
 
-from openai import AsyncOpenAI, APIError, APITimeoutError
+import json
+import logging
+import asyncio
+from typing import Optional, Dict, Any
 
-from ..config import settings
+from openai import AsyncOpenAI, APIError, APITimeoutError
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+
+from ..core.config import settings
 from ..schemas import AIAnalysisResult
 
 logger = logging.getLogger(__name__)
@@ -26,7 +36,7 @@ class AIService:
     Professional AI Service for Ticket Triage.
     
     Strategies:
-    1. Primary: Google Gemini (via OpenAI-compatible API)
+    1. Primary: Google Gemini (Official SDK)
     2. Secondary: OpenAI GPT-4
     3. Fallback: Heuristic Keyword Analysis
     """
@@ -37,35 +47,31 @@ class AIService:
         self.openai_client = AsyncOpenAI(api_key=self.openai_key) if self.openai_key else None
         self.openai_model = settings.openai_model
         
-        # Gemini Setup (Using OpenAI SDK)
-        # Docs: https://ai.google.dev/gemini-api/docs/openai
+        # Gemini Setup (Official SDK)
         self.gemini_key = settings.gemini_api_key
         self.gemini_model = settings.gemini_model
         
-        if self.gemini_key:
-            logger.info(f"Initializing Gemini Client with model: {self.gemini_model}")
-            self.gemini_client = AsyncOpenAI(
-                api_key=self.gemini_key,
-                base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
-            )
+        if self.gemini_key and genai:
+            logger.info(f"Initializing Gemini Client (google-genai) with model: {self.gemini_model}")
+            self.gemini_client = genai.Client(api_key=self.gemini_key)
         else:
+            if self.gemini_key and not genai:
+                logger.error("Gemini API Key present but google-genai library not installed.")
             self.gemini_client = None
 
-    async def analyze_ticket(self, content: str) -> AIAnalysisResult:
+    async def analyze_ticket(self, content: str, api_key: Optional[str] = None) -> AIAnalysisResult:
         """
         Main entry point for ticket analysis.
         Prioritizes Gemini -> OpenAI -> Heuristics.
         """
         # Strategy 1: Google Gemini
-        if self.gemini_client:
+        # Check if we have a client (either instance-level or ephemeral via api_key)
+        has_gemini = self.gemini_client is not None or (api_key is not None and genai is not None)
+        
+        if has_gemini:
             try:
-                logger.info("Analyzing ticket with Google Gemini (OpenAI Compat)...")
-                return await self._analyze_with_llm(
-                    self.gemini_client, 
-                    self.gemini_model, 
-                    content,
-                    "Gemini"
-                )
+                logger.info("Analyzing ticket with Google Gemini...")
+                return await self._analyze_with_gemini(content, api_key)
             except Exception as e:
                 logger.error(f"Gemini Analysis Failed: {e}. Trying next strategy.")
         
@@ -73,12 +79,7 @@ class AIService:
         if self.openai_client:
             try:
                 logger.info("Analyzing ticket with OpenAI...")
-                return await self._analyze_with_llm(
-                    self.openai_client, 
-                    self.openai_model, 
-                    content,
-                    "OpenAI"
-                )
+                return await self._analyze_with_openai(content)
             except Exception as e:
                 logger.error(f"OpenAI Analysis Failed: {e}. Falling back to heuristics.")
 
@@ -86,49 +87,106 @@ class AIService:
         logger.warning("Using heuristic fallback (No AI available or all failed).")
         return self._heuristic_analysis(content)
 
-    async def _analyze_with_llm(self, client: AsyncOpenAI, model: str, content: str, provider_name: str) -> AIAnalysisResult:
-        """Shared logic for calling LLMs via OpenAI SDK."""
+    async def _analyze_with_gemini(self, content: str, api_key: Optional[str] = None) -> AIAnalysisResult:
+        """Analyze using Google Gemini SDK with JSON Mode."""
         
+        # Determine which client to use
+        client = self.gemini_client
+        
+        # If user provided a key, create an ephemeral client
+        if api_key:
+            if not genai:
+                raise ImportError("Google GenAI library not installed.")
+            # Ephemeral client for this request only
+            client = genai.Client(api_key=api_key)
+            
+        if not client:
+             raise ValueError("No Gemini Client available")
+
+        prompt = """
+        You are an expert Senior Support Engineer and Triage Specialist.
+        Analyze this support ticket and output STRICT JSON.
+        
+        Schema:
+        {
+            "urgency": "High" | "Medium" | "Low",
+            "sentiment_score": int (0-10),
+            "category": "Billing" | "Technical" | "Feature" | "Other",
+            "draft_response": "Professional response in markdown."
+        }
+        
+        Ticket Content:
+        """ + content
+
+        try:
+            # Use Synchronous Generate Content (Blocking safe in Celery)
+            # We avoid .aio to prevent "Event loop is closed" errors
+            response = client.models.generate_content(
+                model=self.gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            
+            # Parse JSON
+            text = response.text
+            # Clean strict markdown if present
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.endswith("```"):
+                text = text[:-3]
+            text = text.strip()
+            
+            data = json.loads(text)
+            
+            return AIAnalysisResult(
+                urgency=data.get("urgency", "Medium"),
+                sentiment_score=data.get("sentiment_score", 5),
+                category=data.get("category", "Other"),
+                draft_response=data.get("draft_response", "Thank you, we are reviewing your request.")
+            )
+            
+        except Exception as e:
+            logger.error(f"Gemini Request/Parse Error: {e}")
+            raise e
+
+    async def _analyze_with_openai(self, content: str) -> AIAnalysisResult:
+        """Analyze using OpenAI GPT-4 with JSON Mode."""
+        # ... (Existing OpenAI logic) ...
         system_prompt = """
         You are an expert Senior Support Engineer and Triage Specialist.
         Your task is to analyze incoming support tickets and output structured JSON.
         
         Schema:
         {
-            "urgency": "Critical" | "High" | "Medium" | "Low",
+            "urgency": "High" | "Medium" | "Low",
             "sentiment_score": int (0-10, where 0 is hostile/furious, 10 is delightful),
             "category": "Billing" | "Technical" | "Feature" | "Other",
             "draft_response": "Professional, empathetic, and concise response in markdown format."
         }
         """
         
-        try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt.strip()},
-                    {"role": "user", "content": content}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.3,
-                timeout=15.0
-            )
-            
-            raw_content = response.choices[0].message.content
-            logger.info(f"{provider_name} Raw Response: {raw_content[:100]}...")
-            
-            data = json.loads(raw_content)
-            
-            return AIAnalysisResult(
-                urgency=data.get("urgency", "Medium"),
-                sentiment_score=data.get("sentiment_score", 5),
-                category=data.get("category", "Other"),
-                draft_response=data.get("draft_response", "Thank you for your message. We are reviewing it.")
-            )
-            
-        except Exception as e:
-            logger.error(f"{provider_name} Request Error: {str(e)}")
-            raise e
+        response = await self.openai_client.chat.completions.create(
+            model=self.openai_model,
+            messages=[
+                {"role": "system", "content": system_prompt.strip()},
+                {"role": "user", "content": content}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3,
+            timeout=15.0
+        )
+        
+        raw_content = response.choices[0].message.content
+        data = json.loads(raw_content)
+        
+        return AIAnalysisResult(
+            urgency=data.get("urgency", "Medium"),
+            sentiment_score=data.get("sentiment_score", 5),
+            category=data.get("category", "Other"),
+            draft_response=data.get("draft_response", "Thank you for your message. We are reviewing it.")
+        )
 
     def _heuristic_analysis(self, content: str) -> AIAnalysisResult:
         """
@@ -142,7 +200,7 @@ class AIService:
         high_keywords = ["urgent", "asap", "locked", "payment failed", "charged", "billing"]
         
         if any(w in content_lower for w in critical_keywords):
-            urgency = "Critical"
+            urgency = "High"  # Mapped to High as Critical is not in Enum
             sentiment_score = 2
         elif any(w in content_lower for w in high_keywords):
             urgency = "High"

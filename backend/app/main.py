@@ -12,36 +12,26 @@ This module provides a production-ready REST API with:
 
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Optional, List
-from uuid import UUID
 import logging
 import sys
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request, status
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 import redis.asyncio as aioredis
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from .config import settings
+from .core.config import settings
+from .core.rate_limit import get_limiter
 from .database import get_db, init_db, close_db
-from .models import Ticket, TicketStatus, TicketCategory
-from .schemas import (
-    TicketCreate,
-    TicketResponse,
-    TicketListResponse,
-    HealthCheckResponse,
-    ErrorResponse
-)
-from .tasks import process_ticket
+from .schemas import HealthCheckResponse
 from .middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
-from .exceptions import (
-    BaseAPIException,
-    TicketNotFoundException,
-    DatabaseException,
-)
+from .exceptions import BaseAPIException
+from .api.v1.api import api_router
 
 # Configure logging
 logging.basicConfig(
@@ -95,11 +85,12 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Add custom middleware
-app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
+# Initialize rate limiter
+limiter = get_limiter()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configure CORS for frontend access
+# Configure CORS FIRST (before other middleware) for WebSocket support
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,  # Frontend URLs
@@ -108,6 +99,11 @@ app.add_middleware(
     allow_headers=["*"],  # Allow all headers
     expose_headers=["X-Request-ID"],  # Expose request ID to frontend
 )
+
+# Add custom middleware AFTER CORS
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
 
 # Global exception handlers
 @app.exception_handler(BaseAPIException)
@@ -153,12 +149,6 @@ async def database_exception_handler(request: Request, exc: SQLAlchemyError):
 async def health_check(db: AsyncSession = Depends(get_db)):
     """
     Check the health of the API and its dependencies.
-    
-    Returns:
-        - API status
-        - Database connectivity
-        - Redis connectivity
-        - Current timestamp
     """
     # Check database connection
     try:
@@ -183,220 +173,11 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         timestamp=datetime.utcnow()
     )
 
-
 # ============================================================================
-# Ticket API Endpoints
+# Mount API Router
 # ============================================================================
 
-@app.post(
-    "/api/tickets",
-    response_model=TicketResponse,
-    status_code=status.HTTP_201_CREATED,
-    tags=["Tickets"],
-    summary="Create a new support ticket (non-blocking)"
-)
-async def create_ticket(
-    ticket_data: TicketCreate,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Create a new support ticket and queue it for AI processing.
-    
-    **CRITICAL: This endpoint is non-blocking.**
-    
-    The ticket is saved to the database with status="pending" and a background
-    task is triggered immediately. The API responds in < 100ms regardless of
-    AI processing time.
-    
-    Workflow:
-    1. Validate request payload
-    2. Create ticket in database (status="pending")
-    3. Trigger Celery task for AI processing
-    4. Return ticket ID immediately
-    5. Worker processes in background
-    6. Frontend polls for status updates
-    
-    Args:
-        ticket_data: User's complaint/request
-        
-    Returns:
-        Ticket object with ID and pending status
-        
-    Example:
-        ```bash
-        curl -X POST http://localhost:8000/api/tickets \\
-          -H "Content-Type: application/json" \\
-          -d '{"request_content": "My account is locked"}'
-        ```
-    """
-    try:
-        # Create new ticket in database
-        new_ticket = Ticket(
-            request_content=ticket_data.request_content,
-            status=TicketStatus.PENDING,
-        )
-        
-        db.add(new_ticket)
-        await db.commit()
-        await db.refresh(new_ticket)
-        
-        logger.info(f"Created ticket {new_ticket.id}")
-        
-        # Trigger background task (non-blocking)
-        # The .delay() method queues the task and returns immediately
-        try:
-            process_ticket.delay(str(new_ticket.id))
-            logger.info(f"Queued processing task for ticket {new_ticket.id}")
-        except Exception as worker_error:
-            logger.error(f"Failed to queue task: {worker_error}")
-            # Continue anyway - ticket is created, can be processed manually
-        
-        return TicketResponse.model_validate(new_ticket)
-        
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.error(f"Database error creating ticket: {e}", exc_info=True)
-        raise DatabaseException("Failed to create ticket")
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Unexpected error creating ticket: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create ticket"
-        )
-
-
-@app.get(
-    "/api/tickets",
-    response_model=TicketListResponse,
-    tags=["Tickets"],
-    summary="List all tickets with optional filters"
-)
-async def get_tickets(
-    status_filter: Optional[TicketStatus] = Query(None, description="Filter by status"),
-    category_filter: Optional[TicketCategory] = Query(None, description="Filter by category"),
-    limit: int = Query(50, ge=1, le=100, description="Number of results per page"),
-    offset: int = Query(0, ge=0, description="Pagination offset"),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Retrieve a list of tickets with optional filtering and pagination.
-    
-    This endpoint supports:
-    - **Status filtering**: pending, processing, completed, failed
-    - **Category filtering**: Billing, Technical, Feature
-    - **Pagination**: limit and offset parameters
-    - **Sorting**: By created_at descending (newest first)
-    
-    Frontend should poll this endpoint every 3-5 seconds to show
-    real-time status updates as tickets move through the workflow.
-    
-    Args:
-        status_filter: Optional status filter
-        category_filter: Optional category filter
-        limit: Results per page (1-100)
-        offset: Pagination offset
-        
-    Returns:
-        List of tickets with total count
-        
-    Example:
-        ```bash
-        # Get all pending tickets
-        curl http://localhost:8000/api/tickets?status_filter=pending
-        
-        # Get second page of completed tickets
-        curl http://localhost:8000/api/tickets?status_filter=completed&limit=10&offset=10
-        ```
-    """
-    try:
-        # Build query with filters
-        query = select(Ticket)
-        
-        if status_filter:
-            query = query.where(Ticket.status == status_filter)
-        
-        if category_filter:
-            query = query.where(Ticket.category == category_filter)
-        
-        # Get total count
-        count_query = select(func.count()).select_from(query.subquery())
-        total_result = await db.execute(count_query)
-        total = total_result.scalar()
-        
-        # Apply pagination and sorting
-        query = query.order_by(Ticket.created_at.desc()).limit(limit).offset(offset)
-        
-        # Execute query
-        result = await db.execute(query)
-        tickets = result.scalars().all()
-        
-        return TicketListResponse(
-            tickets=[TicketResponse.model_validate(ticket) for ticket in tickets],
-            total=total,
-            limit=limit,
-            offset=offset
-        )
-        
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch tickets: {str(e)}"
-        )
-
-
-@app.get(
-    "/api/tickets/{ticket_id}",
-    response_model=TicketResponse,
-    tags=["Tickets"],
-    summary="Get a specific ticket by ID"
-)
-async def get_ticket(
-    ticket_id: UUID,
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Retrieve details of a specific ticket by its ID.
-    
-    Use this endpoint to:
-    - Check the current status of a ticket
-    - View AI analysis results (urgency, sentiment, category)
-    - Read the draft response generated by AI
-    
-    Args:
-        ticket_id: UUID of the ticket
-        
-    Returns:
-        Complete ticket details
-        
-    Raises:
-        404: Ticket not found
-        
-    Example:
-        ```bash
-        curl http://localhost:8000/api/tickets/123e4567-e89b-12d3-a456-426614174000
-        ```
-    """
-    try:
-        result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-        ticket = result.scalar_one_or_none()
-        
-        if not ticket:
-            raise TicketNotFoundException(str(ticket_id))
-        
-        return TicketResponse.model_validate(ticket)
-        
-    except TicketNotFoundException:
-        raise
-    except SQLAlchemyError as e:
-        logger.error(f"Database error fetching ticket {ticket_id}: {e}", exc_info=True)
-        raise DatabaseException("Failed to fetch ticket")
-    except Exception as e:
-        logger.error(f"Unexpected error fetching ticket {ticket_id}: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch ticket"
-        )
+app.include_router(api_router, prefix="/api")
 
 
 # ============================================================================
@@ -407,8 +188,6 @@ async def get_ticket(
 async def root():
     """
     API root endpoint with basic information.
-    
-    Returns links to documentation and health check.
     """
     return {
         "message": "AI Support Hub API",
