@@ -2,6 +2,13 @@
 .env
 .env.local
 .env.production
+.env.*.local
+
+# Sensitive/Production files
+SECURITY.md.private
+*.pem
+*.key
+*.cert
 
 # Python
 __pycache__/
@@ -33,6 +40,7 @@ htmlcov/
 venv/
 ENV/
 env/
+*.pyc
 
 # Next.js
 .next/
@@ -49,15 +57,28 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 
 # Docker
 *.log
+docker-compose.override.yml
 
 # Database
 *.db
 *.sqlite
 postgres_data/
+pgdata/
 
 # Alembic
 alembic/versions/*.pyc
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+.removed

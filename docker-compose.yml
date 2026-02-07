@@ -1,4 +1,5 @@
-version: '3.8'
+# AI Support Hub - Docker Compose Configuration
+# Multi-service orchestration for FastAPI backend, Next.js frontend, and PostgreSQL database
 
 services:
   # PostgreSQL Database

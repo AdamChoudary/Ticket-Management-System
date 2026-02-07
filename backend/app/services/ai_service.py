@@ -1,3 +1,14 @@
+"""
+AI Service for Ticket Triage and Analysis.
+
+This module provides AI-powered ticket analysis using Google Gemini API
+with fallback to heuristic analysis for robustness.
+
+Strategies:
+1. Primary: Google Gemini (Official SDK)
+2. Secondary: OpenAI GPT-4 (if configured)
+3. Fallback: Heuristic Keyword Analysis
+"""
 
 import json
 import logging
@@ -5,21 +16,7 @@ import asyncio
 from typing import Optional, Dict, Any
 
 from openai import AsyncOpenAI, APIError, APITimeoutError
-from ..core.config import settings
-from ..schemas import AIAnalysisResult
 
-logger = logging.getLogger(__name__)
-import json
-import logging
-import asyncio
-from typing import Optional, Dict, Any
-
-import json
-import logging
-import asyncio
-from typing import Optional, Dict, Any
-
-from openai import AsyncOpenAI, APIError, APITimeoutError
 try:
     from google import genai
     from google.genai import types
@@ -30,6 +27,7 @@ from ..core.config import settings
 from ..schemas import AIAnalysisResult
 
 logger = logging.getLogger(__name__)
+
 
 class AIService:
     """
