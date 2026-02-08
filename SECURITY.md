@@ -35,7 +35,7 @@ If you discover a security vulnerability in this project, please report it by em
 
 During the cleanup process, we found an actual Gemini API key in the `.env` file:
 ```
-GEMINI_API_KEY=AIzaSyAtbhtbIX6vOFHOa-SFHZ2sMtqC-3rHR8c
+GEMINI_API_KEY=AIzaSyAtbht
 ```
 
 **This key has been removed.** If you committed this key to Git:
